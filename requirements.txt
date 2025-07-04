@@ -7,6 +7,7 @@ langchain-groq
 sentence-transformers
 faiss-cpu
 pandas
+openpyxl
 
 # --- core app ---
 streamlit               # the web UI
