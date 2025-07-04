@@ -1,3 +1,5 @@
+flask
+flask_socketio
 streamlit
 python-dotenv
 langchain
