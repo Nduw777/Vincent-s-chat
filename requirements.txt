@@ -8,6 +8,7 @@ sentence-transformers
 faiss-cpu
 pandas
 openpyxl
+pypdf  
 
 # --- core app ---
 streamlit               # the web UI
