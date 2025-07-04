@@ -7,3 +7,18 @@ langchain-groq
 sentence-transformers
 faiss-cpu
 pandas
+
+# --- core app ---
+streamlit               # the web UI
+python-dotenv           # only if you call load_dotenv()
+
+# --- language & retrieval ---
+langchain               # main LangChain package
+langchain-community     # loaders + vector stores (gives FAISS, PyPDF loader…)
+langchain-groq          # ChatGroq wrapper (remove if you don’t use Groq)
+sentence-transformers   # MiniLM embeddings
+faiss-cpu               # fast similarity search
+
+# --- helpers ---
+pandas                  # tables & DataFrames
+
