@@ -23,3 +23,31 @@ faiss-cpu               # fast similarity search
 # --- helpers ---
 pandas                  # tables & DataFrames
 
+
+
+
+# ── web server ───────────────────────────────────────────────
+flask                 # provides Flask, render_template, request…
+flask_socketio        # Socket.IO websockets for Flask
+
+# ── configuration & logging ──────────────────────────────────
+python-dotenv         # gives you load_dotenv() to read .env files
+
+# ── data handling ────────────────────────────────────────────
+pandas                # DataFrames and read_excel()
+openpyxl              # lets pandas read .xlsx files  ← REQUIRED to fix your ImportError
+
+# ── language‑model stack (LangChain 0.2+) ────────────────────
+langchain             # main LangChain helpers
+langchain-core        # core schemas (usually pulled in automatically, but explicit is safe)
+langchain-community   # loaders & vector stores (FAISS, PyPDF loader…)
+langchain-groq        # wrapper for Groq Llama‑3
+langchain-text-splitters   # new package that holds RecursiveCharacterTextSplitter
+
+# ── embeddings & similarity search ───────────────────────────
+sentence-transformers # MiniLM model for embeddings
+faiss-cpu             # fast vector similarity (works on Streamlit & most hosts)
+
+# ── (optional) if you switch to Streamlit GUI instead of Flask ─
+# streamlit
+
