@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bud Chat Board</title>
+  <link href="https://unpkg.com/lucide-static@0.300.0/icons/gear.svg" rel="prefetch">
+  <!-- (All your CSS stays the same ↓) -->
+  <style>
+    body { margin:0; font-family:Arial, sans-serif; background:#f2f7ff; height:100vh; display:flex; }
+    /* ---------- SIDEBAR ---------- */
+    .sidebar { width:220px; background:#fff; border-right:1px solid #d7dfff; display:flex; flex-direction:column; }
+    .side-head { padding:16px; font-weight:bold; border-bottom:1px solid #ececff; }
+    .chat-link { padding:12px 16px; color:#333; text-decoration:none; display:block; border-bottom:1px solid #f2f4ff }
+    .chat-link:hover { background:#f5f7ff }
+    .chat-link.active { background:#e9edff; font-weight:bold; color:#234 }
+    /* ---------- CHAT AREA ---------- */
+    .gear { position:absolute; right:20px; top:18px; width:24px; cursor:pointer; opacity:.7; }
+    .gear:hover { opacity:1 }
+    .chatbox { flex:1; background:#fff; display:flex; flex-direction:column; max-width:100%; }
+    .messages { flex:1; padding:20px 12px; overflow-y:auto; }
+    .row { display:flex; align-items:flex-start; }
+    .pfp { width:38px; height:38px; border-radius:50%; margin-right:10px; object-fit:cover; }
+    .bubble { max-width:80%; padding:12px 16px; margin:8px 0; border-radius:16px; line-height:1.4em;
+              box-shadow:0 2px 6px rgba(0,0,0,.08); word-wrap:break-word; }
+    .user { background:#4a7cff; color:#fff; margin-left:auto; border-bottom-right-radius:2px; }
+    .bot  { background:#e7e9ff; color:#222; border-bottom-left-radius:2px; }
+    /* ---------- INPUT & BUTTONS ---------- */
+    form { display:flex; padding:12px; background:#eef2ff; }
+    input[type=text] { flex:1; padding:12px 16px; border:1px solid #c5d1ff; border-radius:12px; font-size:1rem; }
+    button { margin-left:8px; padding:12px 20px; border:none; background:#4a7cff; color:#fff; font-size:1rem; border-radius:12px; cursor:pointer; }
+    /* Upload icon */
+    #uploadBtn { padding:12px; width:48px; font-size:20px; background:none; border:none; cursor:pointer; margin-right:8px; }
+    #uploadBtn:hover { transform:scale(1.1); }
+    /* Spinner */
+    #spinner { display:none; width:28px; height:28px; border:4px solid #cbd3ff; border-top-color:#4a7cff; border-radius:50%; animation:spin 1s linear infinite; margin-left:10px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    /* Thinking text */
+    #thinking { font-style:italic; color:#777; padding-left:10px; }
+    /* ---------- MODAL ---------- */
+    .modal { display:none; position:fixed; z-index:999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,.35); }
+    .modal-content { background:#fff; margin:10% auto; padding:20px 26px; border-radius:12px; width:90%; max-width:400px; box-shadow:0 4px 18px rgba(0,0,0,.25); font-size:0.95rem; }
+    .close { float:right; font-size:28px; font-weight:bold; cursor:pointer; color:#888; }
+    .close:hover { color:#000; }
+    /* ---------- WELCOME POP ---------- */
+    @keyframes popIn { 0%{opacity:0;transform:scale(.4);} 80%{transform:scale(1.05);} 100%{opacity:1;transform:scale(1);} }
+    @keyframes popOut{ 0%{opacity:1;transform:scale(1);} 100%{opacity:0;transform:scale(.5);} }
+    .welcome { animation:popIn .15s ease-out forwards; }
+    .welcome.exit { animation:popOut .10s ease-in forwards; }
+    .welcome-container { display:flex; justify-content:center; align-items:center; height:100%; }
+    .big { font-size:36px; line-height:1.2em; }
+    /* Table (optional) */
+    .table { border-collapse:collapse; width:100%; margin:8px 0; }
+    .table th,.table td { border:1px solid #c8d0ff; padding:6px 10px; text-align:left; }
+  </style>
+</head>
+<body>
+
+  <!-- ---------- SIDEBAR ---------- -->
+  <div class="sidebar">
+    <a href="/new" class="chat-link" style="font-weight:bold;color:#008000;">+ New Chat</a>
+    <div class="side-head">Recent Chats</div>
+    {% for cid, title in titles.items()|reverse %}
+      <a href="/?chat={{ cid }}" class="chat-link {% if cid == current_chat %}active{% endif %}">{{ title }}</a>
+    {% endfor %}
+  </div>
+
+  <!-- ---------- CHAT AREA ---------- -->
+  <div class="chatbox">
+    <img src="https://unpkg.com/lucide-static@0.300.0/icons/gear.svg" class="gear" title="Settings">
+
+    <div class="messages" id="messages">
+      {% if history|length == 0 %}
+        <div class="welcome-container">
+          <div id="welcomeRow" class="row welcome">
+            <img src="{{ url_for('static', filename='bot.png') }}" class="pfp">
+            <div class="bubble bot big">👋 Hi! I’m Vincent's board. How can I help you today?</div>
+          </div>
+        </div>
+      {% endif %}
+
+      {% for msg in history %}
+        <div class="row">
+          {% if msg.role == 'user' %}
+            <img src="{{ url_for('static', filename='user.png') }}" class="pfp">
+            <div class="bubble user">{{ msg.text|safe }}</div>
+          {% else %}
+            <img src="{{ url_for('static', filename='bot.png') }}" class="pfp">
+            <div class="bubble bot">{{ msg.text|safe }}</div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+
+    <!-- ---------- CHAT INPUT ---------- -->
+    <form id="chatForm" enctype="multipart/form-data">
+      <button type="button" id="uploadBtn" title="Upload PDF">📗</button>
+      <input type="file" id="uploadFile" name="pdf" accept="application/pdf" style="display:none">
+      <input type="text" name="question" placeholder="Type your message…" autocomplete="off" required>
+      <button type="submit">Send</button>
+      <div id="spinner"></div>
+      <span id="thinking"></span>
+    </form>
+  </div>
+
+  <!-- ---------- SETTINGS POPUP ---------- -->
+  <div id="settingsModal" class="modal">
+    <div class="modal-content">
+      <span id="closeBtn" class="close">&times;</span>
+      <h3>About Bud Chat Board</h3>
+      <p>
+        Vincent's Chat Board is your friendly assistant.<br>
+        • I'm here to help anyone with anything.<br>
+        • Feel free to ask any questions you have.<br>
+        • I'm happy to join you on this journey.<br><br>
+        Have fun chatting!
+      </p>
+    </div>
+  </div>
+
+  <!-- ---------- SCRIPTS ---------- -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    /* === SCROLL TO BOTTOM ON LOAD === */
+    const msgBox = document.getElementById('messages');
+    if (msgBox) msgBox.scrollTop = msgBox.scrollHeight;
+
+    /* === SPINNER + THINKING === */
+    function showSpin(show){ document.getElementById('spinner').style.display = show ? 'inline-block' : 'none'; }
+    function showThinking(t){ document.getElementById('thinking').innerText = t; }
+    function clearThinking(){ document.getElementById('thinking').innerText = ""; }
+
+    /* === MODAL === */
+    const modal  = document.getElementById('settingsModal');
+    const gear   = document.querySelector('.gear');
+    const closeB = document.getElementById('closeBtn');
+    gear.onclick  = () => modal.style.display='block';
+    closeB.onclick= () => modal.style.display='none';
+    window.onclick= e => { if(e.target===modal) modal.style.display='none'; };
+
+    /* === WELCOME AUTO‑HIDE === */
+    const welcome = document.getElementById('welcomeRow');
+    if (welcome){
+      setTimeout(()=>welcome.classList.add('exit'),3500);
+      setTimeout(()=>welcome.remove(),4000);
+    }
+
+    /* === SOCKET.IO === */
+    const socket = io();
+    const room   = "{{ current_chat }}";
+    socket.emit("join", {room});
+
+    /* === FRIENDLY FALLBACK REPLIES === */
+    const fallbackReplies = [
+      "Hmm, I’m not sure yet. Could you say it another way?",
+      "That's a smart question! Let me think about it more.",
+      "I don’t have the answer now, but I can learn!",
+      "Let’s explore it together. What do you already know?",
+      "I'll try looking that up. Hang tight!"
+    ];
+    function getRandomFallback(){
+      return fallbackReplies[Math.floor(Math.random()*fallbackReplies.length)];
+    }
+
+    /* === FORM SUBMIT === */
+    document.getElementById('chatForm').onsubmit = e=>{
+      e.preventDefault();
+      const inp = e.target.question;
+      const txt = inp.value.trim();
+      if(!txt) return;
+      socket.emit("send",{room, text:txt});
+      inp.value="";
+      showSpin(true);
+      showThinking("Thinking…");
+    };
+
+    /* === ADD BUBBLE === */
+    function addBubble(role, html){
+      const row=document.createElement('div');
+      row.className='row';
+      const img=document.createElement('img');
+      img.className='pfp';
+      img.src= role==='user'
+          ? "{{ url_for('static', filename='user.png') }}"
+          : "{{ url_for('static', filename='bot.png') }}";
+      const div=document.createElement('div');
+      div.className='bubble '+(role==='user'?'user':'bot');
+      div.innerHTML=html;
+      row.appendChild(img); row.appendChild(div);
+      msgBox.appendChild(row);
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
+
+    /* === RECEIVE MESSAGE === */
+    socket.on("message", data=>{
+      if(data.role==='bot'){
+        const txt = data.html.toLowerCase();
+        if(txt.includes("sorry") || txt.includes("don't know") || txt.includes("not sure")){
+          data.html = getRandomFallback();
+        }
+      }
+      addBubble(data.role, data.html);
+      showSpin(false);
+      clearThinking();
+    });
+
+    /* === PDF UPLOAD === */
+    const uploadBtn   = document.getElementById('uploadBtn');
+    const uploadInput = document.getElementById('uploadFile');
+    uploadBtn.onclick = () => uploadInput.click();
+
+    uploadInput.onchange = () => {
+      if(!uploadInput.files.length) return;
+      const formData = new FormData();
+      formData.append('pdf', uploadInput.files[0]);
+      fetch('/upload', {method:'POST', body:formData})
+        .then(res=>{
+          if(res.ok){
+            alert('🎉 PDF uploaded!');
+            uploadInput.value="";
+          }else alert('Oops, upload failed.');
+        })
+        .catch(()=> alert('Network error while uploading.'));
+    };
+  </script>
+</body>
+</html>
