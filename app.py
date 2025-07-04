@@ -256,6 +256,3 @@ def on_send(data):
 
 # ── LAUNCH SERVER ────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    print("Running on http://localhost:5000")
-    socketio.run(app, host="0.0.0.0", port=5000)
