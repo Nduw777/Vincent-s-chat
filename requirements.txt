@@ -9,6 +9,8 @@ faiss-cpu
 pandas
 openpyxl
 pypdf  
+eventlet         
+gunicorn          
 
 # --- core app ---
 streamlit               # the web UI
