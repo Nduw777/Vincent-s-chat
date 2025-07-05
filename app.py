@@ -1,28 +1,25 @@
-# app.py – Bud Chat Board (2025‑07‑04 • stable, HF‑token ready)
-# -----------------------------------------------------------------------------
-# Flask + Socket.IO chatbot that can read PDF handbooks, remember rooms, and
-# answer in a kid‑friendly tone.
-# -----------------------------------------------------------------------------
-
-import os, re, logging, string, uuid, random
+"""
+Streamlit version of Bud Chat Bot (kid‑friendly)
+Runs on port 8501 (default for Streamlit Cloud)
+"""
+import os, re, string, logging, uuid
 from datetime import datetime
 from difflib import get_close_matches
 
+import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for
-from flask_socketio import SocketIO, emit, join_room
+from sentence_transformers import SentenceTransformer
 from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.chains import create_retrieval_chain
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFDirectoryLoader
-from sentence_transformers import SentenceTransformer
-from langchain.embeddings.base import Embeddings
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import create_retrieval_chain
 from langchain_core.prompts import ChatPromptTemplate
+from langchain.embeddings.base import Embeddings
 
-# ── BASIC SETUP ───────────────────────────────────────────────────────────────
+# ── CONSTANTS & SETUP ───────────────────────────────────────────────────────
 load_dotenv()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)s | %(message)s")
@@ -30,10 +27,11 @@ logging.basicConfig(level=logging.INFO,
 BOT_NAME   = os.getenv("BOT_NAME", "Bud")
 BOT_TONE   = os.getenv("BOT_TONE", "friendly").lower()
 GROQ_KEY   = os.getenv("GROQ_API_KEY", "")
-UPLOAD_DIR = "data"           # PDFs live here
+HF_TOKEN   = os.getenv("HF_TOKEN")
+UPLOAD_DIR = "data"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ── LLM INITIALISATION ────────────────────────────────────────────────────────
+# ── LLM INITIALISATION ──────────────────────────────────────────────────────
 
 def tone_instruction(tone: str) -> str:
     return {
@@ -54,24 +52,23 @@ if GROQ_KEY:
     )
     logging.info("✅ Groq Llama‑3 client ready.")
 else:
-    logging.warning("❗ GROQ_API_KEY not set – bot falls back to dumb answers.")
+    st.warning("GROQ_API_KEY not set – answers will be limited.")
 
 prompt_template_str = (
     f"{TONE_INSTRUCTION}\n"
     "(Answer in ONE short paragraph. Use ONLY the information in <context>. "
-    "If the context is empty or not relevant, say \"I don't know based on the provided documents.\")\n"
+    "If the context is empty or not relevant, say 'I don't know based on the provided documents.')\n"
     "<context>{{context}}</context>\nQuestion: {{input}}"
 )
-prompt = ChatPromptTemplate.from_template(prompt_template_str)
+PROMPT = ChatPromptTemplate.from_template(prompt_template_str)
 
-# ── EMBEDDINGS IMPLEMENTATION ────────────────────────────────────────────────
-# Added Hugging‑Face token support so we avoid HTTP‑429 rate‑limit errors.
+# ── EMBEDDINGS ──────────────────────────────────────────────────────────────
 class STEmbeddings(Embeddings):
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(
             model_name,
-            cache_folder="models",                       # download once → cached
-            use_auth_token=os.getenv("HF_TOKEN")         # ← token from Streamlit/Render Secrets
+            cache_folder="models",
+            use_auth_token=HF_TOKEN,
         )
 
     def embed_documents(self, texts):
@@ -80,182 +77,77 @@ class STEmbeddings(Embeddings):
     def embed_query(self, text):
         return self.model.encode([text])[0]
 
-# ── FLASK + SOCKET.IO APP ────────────────────────────────────────────────────
-app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET", "change-this-secret")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+# ── DATA LOADERS (cached) ───────────────────────────────────────────────────
+@st.cache_resource(show_spinner="🔍 Building PDF vector index…")
+def load_vectors():
+    docs = PyPDFDirectoryLoader(UPLOAD_DIR).load()
+    if not docs:
+        return None
+    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100).split_documents(docs)
+    return FAISS.from_documents(chunks, STEmbeddings())
 
-# ── IN‑MEMORY CHAT ROOM STORE ────────────────────────────────────────────────
-chats: dict[str, dict] = {}   # {room_id: {title: str, messages: list}}
-
-# ── HELPER FUNCTIONS ─────────────────────────────────────────────────────────
-def normalize(text: str) -> str:
-    return re.sub(rf"[{re.escape(string.punctuation)}]", "", text.lower().strip())
-
-# Load Excel Q&A (optional)
-def load_qa(path: str = os.path.join(UPLOAD_DIR, "questions_answers.xlsx")) -> dict:
+@st.cache_resource(show_spinner="📖 Loading Excel Q&A…")
+def load_qa(path: str = os.path.join(UPLOAD_DIR, "questions_answers.xlsx")):
     if not os.path.exists(path):
         return {}
     df = pd.read_excel(path)
-    df.iloc[:, 0] = df.iloc[:, 0].astype(str).map(normalize)
-    logging.info("Loaded %d Excel Q&A rows.", len(df))
+    df.iloc[:, 0] = df.iloc[:, 0].astype(str).str.replace(f"[{re.escape(string.punctuation)}]", "", regex=True).str.lower()
     return dict(zip(df.iloc[:, 0], df.iloc[:, 1]))
 
-qa_data = load_qa()
+VECTORS = load_vectors()
+QA_DATA = load_qa()
 
-# Build / rebuild FAISS index from PDFs
-def build_vectors():
-    app.config.pop("vectors", None)
-    docs = PyPDFDirectoryLoader(UPLOAD_DIR).load() if os.path.isdir(UPLOAD_DIR) else []
-    logging.info("Loaded %d PDF pages.", len(docs))
-    if not docs:
-        logging.warning("No PDFs to index.")
-        return
-    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100).split_documents(docs)
-    app.config["vectors"] = FAISS.from_documents(chunks, STEmbeddings())
-    logging.info("✅ Vector index built with %d chunks.", len(chunks))
+# ── ANSWER FUNCTION ─────────────────────────────────────────────────────────
 
-build_vectors()
+def normalize(text: str) -> str:
+    return re.sub(rf"[{re.escape(string.punctuation)}]", "", text.lower().strip())
 
-# Shorten long answers in a kid‑friendly way
-def shorten(raw: str, limit: int = 80) -> str:
-    if len(raw.split()) <= limit or not llm:
-        return raw
-    try:
-        short = llm.invoke(
-            f"Please rewrite the following answer in no more than {limit} words, kid‑friendly:\n\n{raw}"
-        )
-        return short.content if hasattr(short, "content") else short
-    except Exception:
-        return raw
 
-# Turn plain text into HTML if user asked for lists or tables
-def postprocess(question: str, raw: str) -> str:
-    raw = shorten(raw)
+def answer(query: str) -> str:
+    if not query:
+        return ""
 
-    if re.search(r"\b(table|tabulate|in a table)\b", question, re.I):
-        rows = [r.strip() for r in re.split(r"\n|;", raw) if r.strip()]
-        data = []
-        for r in rows:
-            if ":" in r:
-                k, v = map(str.strip, r.split(":", 1))
-                data.append({"Item": k, "Value": v})
-            else:
-                data.append({"Item": r})
-        return pd.DataFrame(data).to_html(index=False, border=0, classes="table")
+    key = normalize(query)
+    if key in QA_DATA:
+        return QA_DATA[key]
 
-    if re.search(r"\b(list|bullet points|bullets)\b", question, re.I):
-        items = [i.strip("•- ").strip() for i in re.split(r"\n|;", raw) if i.strip()]
-        return "<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"
-
-    return raw.replace("\n", "<br>")
-
-# ── CORE ANSWER LOGIC ────────────────────────────────────────────────────────
-def answer(user_q: str) -> str:
-    q_clean = user_q.lower().strip()
-
-    if re.search(r"\b(who (are|r) (you|u)|what('?s| is) your name|introduce yourself)\b", q_clean):
-        return postprocess(user_q, f"Hi! I’m <b>{BOT_NAME}</b>, Vincent’s friendly chatbot assistant. 😊")
-    if q_clean in {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}:
-        return postprocess(user_q, "🙋🏾‍♂️ Hello Beloved! How can I help you today?")
-
-    key = normalize(user_q)
-    if key in qa_data:
-        logging.info("📄 Excel exact hit for: %s", key)
-        return postprocess(user_q, qa_data[key])
-    close = get_close_matches(key, qa_data.keys(), n=1, cutoff=0.85)
+    # fuzzy match
+    close = get_close_matches(key, QA_DATA.keys(), n=1, cutoff=0.85)
     if close:
-        logging.info("📄 Excel fuzzy hit for: %s → %s", key, close[0])
-        return postprocess(user_q, qa_data[close[0]])
+        return QA_DATA[close[0]]
 
-    if "vectors" in app.config and app.config["vectors"] and llm:
+    if VECTORS and llm:
+        chain = create_retrieval_chain(
+            retriever=VECTORS.as_retriever(k=4),
+            combine_documents_chain=create_stuff_documents_chain(llm, PROMPT),
+        )
         try:
-            logging.info("🔍 Trying vector search for: %s", user_q)
-            chain = create_retrieval_chain(
-                retriever=app.config["vectors"].as_retriever(search_type="similarity", k=4),
-                combine_documents_chain=create_stuff_documents_chain(llm, prompt)
-            )
-            result = chain.invoke({"input": user_q})
-            logging.info("🔍 Retrieval keys: %s", list(result.keys()))
-            answer_txt = result.get("answer") or result.get("result") or result.get("output_text")
-            if answer_txt:
-                logging.info("✅ Served from PDF vectors.")
-                return postprocess(user_q, answer_txt)
-            logging.warning("⚠️ Vector search returned no answer text.")
+            result = chain.invoke({"input": query})
+            return result.get("answer") or "I don't know yet."
         except Exception as e:
             logging.error("Retrieval chain failed: %s", e)
 
-    if llm:
-        try:
-            logging.info("🤔 Falling back to LLM for: %s", user_q)
-            raw = llm.invoke(user_q)
-            raw = raw.content if hasattr(raw, "content") else raw
-            return postprocess(user_q, raw)
-        except Exception as e:
-            logging.error("LLM fallback failed: %s", e)
+    return "Sorry, I don't know yet."  # fallback
 
-    return postprocess(user_q, "Sorry, I don't know yet.")
+# ── STREAMLIT UI ────────────────────────────────────────────────────────────
+st.set_page_config(page_title="Bud Chat Bot", page_icon="🧑‍🚀", layout="centered")
+st.title("🎒 Bud Chat Bot")
 
-# ── ROUTES ───────────────────────────────────────────────────────────────────
-@app.route("/")
-def home():
-    room = request.args.get("chat", "default")
-    chats.setdefault(room, {"title": room, "messages": []})
-    return render_template(
-        "index.html",
-        titles={cid: c["title"] for cid, c in chats.items()},
-        current_chat=room,
-        history=chats[room]["messages"],
-    )
+# File uploader (optional, for PDF handbooks)
+ud_pdf = st.file_uploader("Upload a PDF to add to knowledge base", type="pdf")
+if ud_pdf:
+    uid = str(uuid.uuid4()) + ".pdf"
+    with open(os.path.join(UPLOAD_DIR, uid), "wb") as f:
+        f.write(ud_pdf.read())
+    st.success("PDF uploaded. Rebuilding vectors…")
+    VECTORS = load_vectors(clear_cache=True)  # rebuild index
+    st.rerun()
 
-@app.route("/new")
-def new_chat():
-    cid = datetime.utcnow().strftime("%Y%m%d%H%M%S") + "-" + str(random.randint(100,999))
-    chats[cid] = {"title": "Untitled chat", "messages": []}
-    return redirect(url_for("home", chat=cid))
+user_q = st.text_input("Ask me anything:")
+if user_q:
+    with st.spinner("Thinking…"):
+        response = answer(user_q)
+    st.markdown(response)
 
-@app.route("/upload", methods=["POST"])
-def upload_pdf():
-    pdf = request.files.get("pdf")
-    if not pdf or not pdf.filename.lower().endswith(".pdf"):
-        return "Bad file", 400
-    fname = f"{uuid.uuid4()}.pdf"
-    pdf.save(os.path.join(UPLOAD_DIR, fname))
-    build_vectors()
-    return "OK", 200
-
-# ── SOCKET.IO EVENTS ─────────────────────────────────────────────────────────
-@socketio.on("join")
-def on_join(data):
-    room = data.get("room", "default")
-    join_room(room)
-    emit("message",
-         {"role": "bot", "html": f"✅ Joined room <b>{room}</b>. we are to help you!"},
-         room=room)
-
-@socketio.on("send")
-def on_send(data):
-    room = data.get("room", "default")
-    text = data.get("text", "")
-
-    if chats[room]["title"] in {"Untitled chat", room}:
-        chats[room]["title"] = (text[:30] + ("…" if len(text) > 30 else ""))
-
-    emit("message", {"role": "user", "html": text}, room=room)
-    bot_html = answer(text)
-    emit("message", {"role": "bot", "html": bot_html}, room=room)
-    chats[room]["messages"].extend([
-        {"role": "user", "text": text},
-        {"role": "bot",  "text": bot_html},
-    ])
-
-# ── LAUNCH SERVER (local test only) ──────────────────────────────────────────
-# Safe to keep; ignored by gunicorn on Render/Railway/Heroku.
-if __name__ == "__main__":
-    print("Running on http://localhost:5000")
-    socketio.run(
-        app,
-        host="0.0.0.0",
-        port=5000,
-        allow_unsafe_werkzeug=True   # OK for local testing
-    )
+st.markdown("---")
+st.caption("Powered by LangChain, Groq, and Hugging Face ✨")
