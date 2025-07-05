@@ -31,4 +31,4 @@ sentence-transformers  # let pip choose latest (2.7.0+)
 
 
 # ── Vector Store ──
-faiss-cpu==1.7.4
+faiss-cpu==1.8.0
