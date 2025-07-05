@@ -1,10 +1,7 @@
-# app.py – Bud Chat Board (2025‑07‑04 • stable)
+# app.py – Bud Chat Board (2025‑07‑04 • stable, HF‑token ready)
 # -----------------------------------------------------------------------------
 # Flask + Socket.IO chatbot that can read PDF handbooks, remember rooms, and
-# answer in a kid‑friendly tone.  This version fixes:
-#   • create_stuff_documents_chain verbose bug
-#   • mismatched parentheses that froze the server
-#   • detailed logging to trace retrieval vs. LLM fallback
+# answer in a kid‑friendly tone.
 # -----------------------------------------------------------------------------
 
 import os, re, logging, string, uuid, random
@@ -68,12 +65,18 @@ prompt_template_str = (
 prompt = ChatPromptTemplate.from_template(prompt_template_str)
 
 # ── EMBEDDINGS IMPLEMENTATION ────────────────────────────────────────────────
-
+# Added Hugging‑Face token support so we avoid HTTP‑429 rate‑limit errors.
 class STEmbeddings(Embeddings):
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        self.model = SentenceTransformer(model_name, cache_folder="models")
+        self.model = SentenceTransformer(
+            model_name,
+            cache_folder="models",                       # download once → cached
+            use_auth_token=os.getenv("HF_TOKEN")         # ← token from Streamlit/Render Secrets
+        )
+
     def embed_documents(self, texts):
         return self.model.encode(texts, show_progress_bar=False)
+
     def embed_query(self, text):
         return self.model.encode([text])[0]
 
@@ -86,12 +89,10 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 chats: dict[str, dict] = {}   # {room_id: {title: str, messages: list}}
 
 # ── HELPER FUNCTIONS ─────────────────────────────────────────────────────────
-
 def normalize(text: str) -> str:
     return re.sub(rf"[{re.escape(string.punctuation)}]", "", text.lower().strip())
 
 # Load Excel Q&A (optional)
-
 def load_qa(path: str = os.path.join(UPLOAD_DIR, "questions_answers.xlsx")) -> dict:
     if not os.path.exists(path):
         return {}
@@ -103,7 +104,6 @@ def load_qa(path: str = os.path.join(UPLOAD_DIR, "questions_answers.xlsx")) -> d
 qa_data = load_qa()
 
 # Build / rebuild FAISS index from PDFs
-
 def build_vectors():
     app.config.pop("vectors", None)
     docs = PyPDFDirectoryLoader(UPLOAD_DIR).load() if os.path.isdir(UPLOAD_DIR) else []
@@ -118,7 +118,6 @@ def build_vectors():
 build_vectors()
 
 # Shorten long answers in a kid‑friendly way
-
 def shorten(raw: str, limit: int = 80) -> str:
     if len(raw.split()) <= limit or not llm:
         return raw
@@ -131,7 +130,6 @@ def shorten(raw: str, limit: int = 80) -> str:
         return raw
 
 # Turn plain text into HTML if user asked for lists or tables
-
 def postprocess(question: str, raw: str) -> str:
     raw = shorten(raw)
 
@@ -153,7 +151,6 @@ def postprocess(question: str, raw: str) -> str:
     return raw.replace("\n", "<br>")
 
 # ── CORE ANSWER LOGIC ────────────────────────────────────────────────────────
-
 def answer(user_q: str) -> str:
     q_clean = user_q.lower().strip()
 
@@ -200,7 +197,6 @@ def answer(user_q: str) -> str:
     return postprocess(user_q, "Sorry, I don't know yet.")
 
 # ── ROUTES ───────────────────────────────────────────────────────────────────
-
 @app.route("/")
 def home():
     room = request.args.get("chat", "default")
@@ -229,7 +225,6 @@ def upload_pdf():
     return "OK", 200
 
 # ── SOCKET.IO EVENTS ─────────────────────────────────────────────────────────
-
 @socketio.on("join")
 def on_join(data):
     room = data.get("room", "default")
@@ -254,5 +249,13 @@ def on_send(data):
         {"role": "bot",  "text": bot_html},
     ])
 
-# ── LAUNCH SERVER ────────────────────────────────────────────────────────────
-
+# ── LAUNCH SERVER (local test only) ──────────────────────────────────────────
+# Safe to keep; ignored by gunicorn on Render/Railway/Heroku.
+if __name__ == "__main__":
+    print("Running on http://localhost:5000")
+    socketio.run(
+        app,
+        host="0.0.0.0",
+        port=5000,
+        allow_unsafe_werkzeug=True   # OK for local testing
+    )
