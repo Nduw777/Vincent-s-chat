@@ -161,6 +161,9 @@ footer {visibility:hidden;}
 
 # 5. Handle quick‑ask query param
 params = st.experimental_get_query_params()
-if q == "" and "q" in params:
-    st.session_state.input = params["q"][0]
+param_q = params.get("q")               # may be list or single value
+if q == "" and param_q:
+    # if it's already a list take first item, else cast to str
+    val = param_q[0] if isinstance(param_q, list) else str(param_q)
+    st.session_state.input = val
     st.rerun()
