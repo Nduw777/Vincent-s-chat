@@ -74,7 +74,7 @@ def load_vectors():
     docs = PyPDFDirectoryLoader(UPLOAD_DIR).load()
     if not docs:
         return None
-    chunks = RecursiveCharacterTextSplitter(500, 100).split_documents(docs)
+    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100).split_documents(docs)
     return FAISS.from_documents(chunks, STEmbeddings())
 
 @st.cache_resource(show_spinner="📖 Loading Excel Q&A…")
