@@ -16,3 +16,6 @@ accelerate==0.27.2
 torch==2.2.2
 faiss-cpu==1.8.0          # cp311 wheel
 
+torch==2.2.2
+faiss-cpu==1.8.0
+numpy                     # ← add this
