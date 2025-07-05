@@ -1,56 +1,30 @@
+# ── web server ───────────────────────────────────────────────
 flask
 flask_socketio
+eventlet
+gunicorn
+
+# ── streamlit GUI (optional) ─────────────────────────────────
 streamlit
-python-dotenv
-langchain
-langchain-groq
-sentence-transformers
-faiss-cpu
-pandas
-openpyxl
-pypdf  
-eventlet         
-gunicorn          
-
-# --- core app ---
-streamlit               # the web UI
-python-dotenv           # only if you call load_dotenv()
-
-# --- language & retrieval ---
-langchain               # main LangChain package
-langchain-community     # loaders + vector stores (gives FAISS, PyPDF loader…)
-langchain-groq          # ChatGroq wrapper (remove if you don’t use Groq)
-sentence-transformers   # MiniLM embeddings
-faiss-cpu               # fast similarity search
-
-# --- helpers ---
-pandas                  # tables & DataFrames
-
-
-
-
-# ── web server ───────────────────────────────────────────────
-flask                 # provides Flask, render_template, request…
-flask_socketio        # Socket.IO websockets for Flask
 
 # ── configuration & logging ──────────────────────────────────
-python-dotenv         # gives you load_dotenv() to read .env files
+python-dotenv
 
 # ── data handling ────────────────────────────────────────────
-pandas                # DataFrames and read_excel()
-openpyxl              # lets pandas read .xlsx files  ← REQUIRED to fix your ImportError
+pandas
+openpyxl        # lets pandas read Excel (.xlsx)
+pypdf           # lets LangChain read PDF files
 
 # ── language‑model stack (LangChain 0.2+) ────────────────────
-langchain             # main LangChain helpers
-langchain-core        # core schemas (usually pulled in automatically, but explicit is safe)
-langchain-community   # loaders & vector stores (FAISS, PyPDF loader…)
-langchain-groq        # wrapper for Groq Llama‑3
-langchain-text-splitters   # new package that holds RecursiveCharacterTextSplitter
+langchain
+langchain-core
+langchain-community
+langchain-groq
+langchain-text-splitters
 
 # ── embeddings & similarity search ───────────────────────────
-sentence-transformers # MiniLM model for embeddings
-faiss-cpu             # fast vector similarity (works on Streamlit & most hosts)
-
-# ── (optional) if you switch to Streamlit GUI instead of Flask ─
-# streamlit
-
+sentence-transformers==2.5.1
+transformers==4.40.2
+accelerate==0.27.2
+torch==2.2.2            # ✅ FIX: avoids meta tensor NotImplementedError
+faiss-cpu
