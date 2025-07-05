@@ -160,6 +160,7 @@ footer {visibility:hidden;}
 """, unsafe_allow_html=True)
 
 # 5. Handle quick‑ask query param
-if q == "" and "q" in st.query_params:
-    st.session_state.input = st.query_params["q"]
+params = st.experimental_get_query_params()
+if q == "" and "q" in params:
+    st.session_state.input = params["q"][0]
     st.rerun()
