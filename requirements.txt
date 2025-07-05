@@ -25,8 +25,10 @@ langchain-text-splitters
 # ── Embeddings / Transformers ──
 sentence-transformers==2.5.1
 transformers==4.40.2
-accelerate==0.27.2
-torch==2.2.2
+torch==2.7.1           # wheels exist for cp313
+accelerate==0.29.3     # match Torch ≥2.7
+sentence-transformers  # let pip choose latest (2.7.0+)
+
 
 # ── Vector Store ──
 faiss-cpu==1.7.4
