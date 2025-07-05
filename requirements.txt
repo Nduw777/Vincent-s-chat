@@ -18,4 +18,10 @@ faiss-cpu==1.8.0          # cp311 wheel
 
 torch==2.2.2
 faiss-cpu==1.8.0
-numpy                     
+torch==2.2.2
+faiss-cpu==1.8.0
+sentence-transformers==2.5.1
+transformers==4.40.2
+accelerate==0.27.2
+numpy==1.26.4         # 👈 safe and compatible
+
