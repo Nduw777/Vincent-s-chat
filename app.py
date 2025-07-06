@@ -146,7 +146,7 @@ def answer(q: str) -> str:
 # ── STREAMLIT UI ───────────────────────────────────────────────────────────
 st.set_page_config("Bud Bot", "🤖", layout="centered")
 
-st.image(r"C:\Users\Lenovo\Pictures\My Pucture\Map and Flag.png", width=110)
+st.image("C:\Users\Lenovo\Pictures\My Pucture\Map and Flag.png", width=110)
 st.markdown("<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'>Ask me anything in a friendly way!</p>", unsafe_allow_html=True)
 st.divider()
 
