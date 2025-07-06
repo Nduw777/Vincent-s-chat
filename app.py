@@ -106,7 +106,7 @@ def load_all_sessions() -> dict[str, list[dict[str,str]]]:
         try:
             return json.loads(SESSIONS_PATH.read_text())
         except Exception:
-            logging.warning(⚠️ Could not read chat_sessions.json; starting fresh.")
+            logging.warning("⚠️ Could not read chat_sessions.json; starting fresh.")
     return {"New Chat": []}
 
 
