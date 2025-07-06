@@ -69,7 +69,7 @@ class STEmbeddings(Embeddings):
         return self.model.encode([text])[0]
 
 # ── CACHED LOADERS ──────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="🔍 Building PDF index…")
+@st.cache_resource(show_spinner="🔍 Most Welcome!Happy to See you")
 def load_vectors():
     docs = PyPDFDirectoryLoader(UPLOAD_DIR).load()
     if not docs:
@@ -128,7 +128,7 @@ st.divider()
 col_chat, col_up = st.columns([3,1])
 
 with col_chat:
-    q = st.text_input("💬 Type your question here:", key="input")
+    q = st.text_input("🧏🏼‍♂️ Type your question here:", key="input")
     if st.button("Ask", type="primary") and q:
         with st.spinner("Thinking…"):
             st.chat_message("user").markdown(q)
@@ -139,7 +139,7 @@ with col_chat:
             st.chat_message("assistant").markdown(reply)
 
 with col_up:
-    st.write("📚 **Add PDFs**")
+    st.write("📗 **Add PDFs**")
     pdf = st.file_uploader(" ", type="pdf", label_visibility="collapsed")
     if pdf:
         uid = f"{uuid.uuid4()}.pdf"
