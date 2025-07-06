@@ -1,0 +1,2 @@
+[server]
+fileWatcherType = "poll"   # use "none" if you never edit files live
