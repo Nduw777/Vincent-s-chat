@@ -226,7 +226,7 @@ with st.sidebar:
 # ─── Main chat area ───────────────────────────────────────────────────────
 
 st.image(
-    "https://raw.githubusercontent.com/tailwindlabs/heroicons/master/solid/chat-bubble-left-right.svg",
+    "https://s.tmimgcdn.com/scr/1200x750/153700/business-analytics-logo-template_153739-original.jpg",
     width=60,
 )
 st.markdown("<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'>Ask me anything in a friendly way!</p>", unsafe_allow_html=True)
