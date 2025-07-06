@@ -1,12 +1,24 @@
-"""
-Streamlit version of **Bud Chat Bot**
-Kid‑friendly layout, bright colors, rounded chat bubbles 😊
-Works on Streamlit Cloud (port 8501).  PDF upload + Groq‑powered answers.
-"""
-import os, re, string, logging, uuid
-from difflib import get_close_matches
-from datetime import datetime
+# app.py – Bud Chat Bot (Streamlit)
+# -----------------------------------------------------------------------------
+# Kid‑friendly chatbot with:
+#   • Greeting replies (hi/hello/hey…)
+#   • Excel Q&A lookup
+#   • PDF vector search (FAISS) + Groq Llama‑3 answers
+#   • Plain Groq fallback
+#   • Works on Streamlit Cloud (port 8501) – fileWatcherType set to "poll".
+# -----------------------------------------------------------------------------
 
+# ── ENV FIX FOR STREAMLIT CLOUD ──────────────────────────────────────────────
+# Must be set *before* importing streamlit so the watcher limit isn’t hit.
+import os
+os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "poll")  # safer than inotify
+
+# ── STANDARD LIB ────────────────────────────────────────────────────────────
+import re, string, logging, uuid, traceback
+from difflib import get_close_matches
+from datetime import datetime  # (kept for future logging if needed)
+
+# ── THIRD‑PARTY ─────────────────────────────────────────────────────────────
 import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
@@ -22,8 +34,7 @@ from langchain.embeddings.base import Embeddings
 
 # ── ENV & LOG ───────────────────────────────────────────────────────────────
 load_dotenv()
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s | %(levelname)s | %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
 BOT_NAME   = os.getenv("BOT_NAME", "Bud")
 BOT_TONE   = os.getenv("BOT_TONE", "friendly").lower()
@@ -56,9 +67,12 @@ if GROQ_KEY:
         max_tokens=256,
     )
     logging.info("✅ Groq client ready")
+else:
+    logging.warning("🚨 GROQ_API_KEY missing – fallback answers will be unavailable!")
 
-# ── EMBEDDINGS ──────────────────────────────────────────────────────────────
+# ── EMBEDDINGS WRAPPER ──────────────────────────────────────────────────────
 class STEmbeddings(Embeddings):
+    """Sentence‑Transformers wrapper for LangChain."""
     def __init__(self, model="all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(model, cache_folder="models", use_auth_token=HF_TOKEN)
 
@@ -68,31 +82,46 @@ class STEmbeddings(Embeddings):
     def embed_query(self, text):
         return self.model.encode([text])[0]
 
+# ── HELPER: NORMALISE TEXT ──────────────────────────────────────────────────
+
+def normalize(text: str) -> str:
+    """Lowercase, trim, and strip punctuation so lookups are easy."""
+    return re.sub(rf"[{re.escape(string.punctuation)}]", "", text.lower().strip())
+
 # ── CACHED LOADERS ──────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="🔍 Most Welcome!Happy to See you")
+@st.cache_resource(show_spinner="🔍 Building PDF index…")
 def load_vectors():
+    """Load PDFs from UPLOAD_DIR and create a FAISS vector store."""
     docs = PyPDFDirectoryLoader(UPLOAD_DIR).load()
     if not docs:
         return None
-    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100).split_documents(docs)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    chunks = splitter.split_documents(docs)
     return FAISS.from_documents(chunks, STEmbeddings())
 
 @st.cache_resource(show_spinner="📖 Loading Excel Q&A…")
 def load_qa(path=os.path.join(UPLOAD_DIR, "questions_answers.xlsx")):
+    """Load an Excel file where column 0 is Q and column 1 is A."""
     if not os.path.exists(path):
         return {}
     df = pd.read_excel(path)
-    df.iloc[:, 0] = (df.iloc[:, 0].astype(str)
-                     .str.replace(f"[{re.escape(string.punctuation)}]", "", regex=True)
-                     .str.lower())
+    if df.shape[1] < 2:
+        logging.warning("Excel file needs at least two columns (Q & A).")
+        return {}
+    df.iloc[:, 0] = (
+        df.iloc[:, 0].astype(str)
+        .str.replace(f"[{re.escape(string.punctuation)}]", "", regex=True)
+        .str.lower()
+    )
     return dict(zip(df.iloc[:, 0], df.iloc[:, 1]))
 
 VECTORS = load_vectors()
 QA_DATA = load_qa()
 
 # ── ANSWER FUNCTION ─────────────────────────────────────────────────────────
+
 def answer(q: str) -> str:
-    """Return a friendly answer or log why we failed."""
+    """Route the user question to greetings, Excel, PDF+LLM, or fallback."""
     try:
         if not q:
             return ""
@@ -106,12 +135,12 @@ def answer(q: str) -> str:
 
         # 2️⃣ Excel exact match
         if q_norm in QA_DATA:
-            return QA_DATA[q_norm]
+            return str(QA_DATA[q_norm])
 
         # 3️⃣ Excel close match
         close = get_close_matches(q_norm, QA_DATA.keys(), n=1, cutoff=0.85)
         if close:
-            return QA_DATA[close[0]]
+            return str(QA_DATA[close[0]])
 
         # 4️⃣ PDF vector + Groq
         if VECTORS and llm:
@@ -124,65 +153,71 @@ def answer(q: str) -> str:
             if ans and "I don't know" not in ans:
                 return ans
 
-        # 5️⃣ Plain Groq fallback
+        # 5️⃣ Plain Groq fallback (no PDF context)
         if llm:
-            raw = llm.invoke(PROMPT.format(context="", input=q))
-            return raw.strip()
+            ans = llm.invoke(PROMPT.format(context="", input=q)).strip()
+            return ans
 
+        # 6️⃣ Ultimate fallback
         return "🤷‍♂️ Sorry, I don’t have an answer for that right now."
 
     except Exception:
         logging.error("answer() crashed:\n" + traceback.format_exc())
-        raise  # Let Streamlit show the friendly “Oops!” message
+        raise  # Let outer try/except show the friendly message
 
 # ── STREAMLIT PAGE ──────────────────────────────────────────────────────────
 st.set_page_config("Bud Bot", "🤖", layout="centered")
 
-# 1. THEME (via config.toml) already handled; header:
+# Header
 st.image("https://i.imgur.com/nb3G9p6.png", width=110)
-st.markdown("<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'>Ask me anything in a friendly way!</p>", unsafe_allow_html=True)
+st.markdown(
+    "<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1>"
+    "<p style='text-align:center;'>Ask me anything in a friendly way!</p>",
+    unsafe_allow_html=True,
+)
 st.divider()
 
-# 2. Layout: chat left, upload right
-col_chat, col_up = st.columns([3,1])
+# Layout: chat left, upload right
+col_chat, col_up = st.columns([3, 1])
 
 with col_chat:
     q = st.text_input("🧏🏼‍♂️ Type your question here:", key="input")
     if st.button("Ask", type="primary") and q:
-        with st.spinner("Thinking…"):
-            st.chat_message("user").markdown(q)
-            try:
-                reply = answer(q)
-            except Exception:
-                reply = "Oops! I got confused. Try again?"
-            st.chat_message("assistant").markdown(reply)
+        st.chat_message("user").markdown(q)
+        try:
+            reply = answer(q)
+        except Exception:
+            reply = "Oops! I got confused. Try again?"
+        st.chat_message("assistant").markdown(reply)
 
 with col_up:
     st.write("📗 **Add PDFs**")
     pdf = st.file_uploader(" ", type="pdf", label_visibility="collapsed")
     if pdf:
         uid = f"{uuid.uuid4()}.pdf"
-        open(os.path.join(UPLOAD_DIR, uid), "wb").write(pdf.read())
-        load_vectors.clear()
+        with open(os.path.join(UPLOAD_DIR, uid), "wb") as f:
+            f.write(pdf.read())
+        load_vectors.clear()  # Rebuild cache next time
         st.success("PDF uploaded! Vector index will rebuild on next question.")
 
-# 3. Quick‑ask examples
+# Quick‑ask examples
 quick = ["Who are you?", "Tell me a fun fact!", "How do planes fly?"]
-st.markdown("**Try one:** " + " | ".join(f"🟢 [{x}](?q={x.replace(' ','%20')})" for x in quick))
+links = " | ".join(f"🟢 [{x}](?q={x.replace(' ', '%20')})" for x in quick)
+st.markdown(f"**Try one:** {links}")
 
-# 4. CSS polish
-st.markdown("""
+# CSS tweaks
+st.markdown(
+    """
 <style>
 .stChatMessage {border-radius:18px!important;}
 footer {visibility:hidden;}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# 5. Handle quick‑ask query param
+# Handle quick‑ask query param (so links auto‑fill input)
 params = st.experimental_get_query_params()
-param_q = params.get("q")               # may be list or single value
-if q == "" and param_q:
-    # if it's already a list take first item, else cast to str
-    val = param_q[0] if isinstance(param_q, list) else str(param_q)
-    st.session_state.input = val
+if not q and (val := params.get("q")):
+    st.session_state.input = val[0] if isinstance(val, list) else str(val)
     st.rerun()
