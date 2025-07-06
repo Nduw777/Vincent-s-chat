@@ -121,7 +121,7 @@ QA_DATA = load_qa()
 # ── ANSWER FUNCTION ─────────────────────────────────────────────────────────
 
 def answer(q: str) -> str:
-    """Route the user question to greetings, Excel, PDF+LLM, or fallback."""
+    """Route the user question to greetings, identity, Excel, PDF+LLM, or fallback."""
     try:
         if not q:
             return ""
@@ -132,6 +132,10 @@ def answer(q: str) -> str:
         greetings = {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}
         if q_norm in greetings:
             return "👋 Hi there! How can I help you today?"
+
+        # 1️⃣🅱️ Identity / "Who are you?"
+        if re.search(r"(who (are|r) (you|u)|what('?s| is) your name|introduce yourself)", q_norm):
+            return f"😊 Hi! I’m {BOT_NAME}, your friendly chatbot assistant."
 
         # 2️⃣ Excel exact match
         if q_norm in QA_DATA:
@@ -162,7 +166,8 @@ def answer(q: str) -> str:
         return "🤷‍♂️ Sorry, I don’t have an answer for that right now."
 
     except Exception:
-        logging.error("answer() crashed:\n" + traceback.format_exc())
+        logging.error("answer() crashed:
+" + traceback.format_exc())
         raise  # Let outer try/except show the friendly message
 
 # ── STREAMLIT PAGE ──────────────────────────────────────────────────────────
