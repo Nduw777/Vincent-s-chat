@@ -91,19 +91,27 @@ VECTORS = load_vectors()
 QA_DATA = load_qa()
 
 # ── ANSWER FUNCTION ─────────────────────────────────────────────────────────
-def normalize(text:str)->str:
-    return re.sub(rf"[{re.escape(string.punctuation)}]", "", text.lower().strip())
-
-def answer(q:str)->str:
+def answer(q: str) -> str:
     if not q:
         return ""
-    key = normalize(q)
-    if key in QA_DATA:
-        return QA_DATA[key]
-    close = get_close_matches(key, QA_DATA.keys(), n=1, cutoff=0.85)
+
+    q_norm = normalize(q)
+
+    # 1. Respond to greetings
+    greetings = {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}
+    if q_norm in greetings:
+        return "👋 Hi there! How can I help you today?"
+
+    # 2. Check Excel Q&A match
+    if q_norm in QA_DATA:
+        return QA_DATA[q_norm]
+
+    # 3. Try close match in Excel
+    close = get_close_matches(q_norm, QA_DATA.keys(), n=1, cutoff=0.85)
     if close:
         return QA_DATA[close[0]]
 
+    # 4. Check PDF vector + Groq
     if VECTORS and llm:
         try:
             chain = create_retrieval_chain(
@@ -111,10 +119,23 @@ def answer(q:str)->str:
                 combine_documents_chain=create_stuff_documents_chain(llm, PROMPT),
             )
             out = chain.invoke({"input": q})
-            return out.get("answer", "I don't know yet.")
+            answer_text = out.get("answer", "").strip()
+
+            if "I don't know" not in answer_text:  # LLM found something in PDF
+                return answer_text
         except Exception as e:
-            logging.error(e)
-    return "Sorry, I don't know yet."
+            logging.error(f"Vector/Groq error: {e}")
+
+    # 5. Final fallback: LLM general answer (outside PDFs)
+    if llm:
+        try:
+            fallback_prompt = PROMPT.format(context="", input=q)
+            response = llm.invoke(fallback_prompt)
+            return response.strip()
+        except Exception as e:
+            logging.error(f"Fallback LLM error: {e}")
+
+    return "🤷‍♂️ Sorry, I don’t have an answer for that right now."
 
 # ── STREAMLIT PAGE ──────────────────────────────────────────────────────────
 st.set_page_config("Bud Bot", "🤖", layout="centered")
