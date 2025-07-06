@@ -92,50 +92,48 @@ QA_DATA = load_qa()
 
 # ── ANSWER FUNCTION ─────────────────────────────────────────────────────────
 def answer(q: str) -> str:
-    if not q:
-        return ""
+    """Return a friendly answer or log why we failed."""
+    try:
+        if not q:
+            return ""
 
-    q_norm = normalize(q)
+        q_norm = normalize(q)
 
-    # 1. Respond to greetings
-    greetings = {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}
-    if q_norm in greetings:
-        return "👋 Hi there! How can I help you today?"
+        #1️⃣ Greetings
+        greetings = {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}
+        if q_norm in greetings:
+            return "👋 Hi there! How can I help you today?"
 
-    # 2. Check Excel Q&A match
-    if q_norm in QA_DATA:
-        return QA_DATA[q_norm]
+        # 2️⃣ Excel exact match
+        if q_norm in QA_DATA:
+            return QA_DATA[q_norm]
 
-    # 3. Try close match in Excel
-    close = get_close_matches(q_norm, QA_DATA.keys(), n=1, cutoff=0.85)
-    if close:
-        return QA_DATA[close[0]]
+        # 3️⃣ Excel close match
+        close = get_close_matches(q_norm, QA_DATA.keys(), n=1, cutoff=0.85)
+        if close:
+            return QA_DATA[close[0]]
 
-    # 4. Check PDF vector + Groq
-    if VECTORS and llm:
-        try:
+        # 4️⃣ PDF vector + Groq
+        if VECTORS and llm:
             chain = create_retrieval_chain(
                 retriever=VECTORS.as_retriever(k=4),
                 combine_documents_chain=create_stuff_documents_chain(llm, PROMPT),
             )
             out = chain.invoke({"input": q})
-            answer_text = out.get("answer", "").strip()
+            ans = out.get("answer", "").strip()
+            if ans and "I don't know" not in ans:
+                return ans
 
-            if "I don't know" not in answer_text:  # LLM found something in PDF
-                return answer_text
-        except Exception as e:
-            logging.error(f"Vector/Groq error: {e}")
+        # 5️⃣ Plain Groq fallback
+        if llm:
+            raw = llm.invoke(PROMPT.format(context="", input=q))
+            return raw.strip()
 
-    # 5. Final fallback: LLM general answer (outside PDFs)
-    if llm:
-        try:
-            fallback_prompt = PROMPT.format(context="", input=q)
-            response = llm.invoke(fallback_prompt)
-            return response.strip()
-        except Exception as e:
-            logging.error(f"Fallback LLM error: {e}")
+        return "🤷‍♂️ Sorry, I don’t have an answer for that right now."
 
-    return "🤷‍♂️ Sorry, I don’t have an answer for that right now."
+    except Exception:
+        logging.error("answer() crashed:\n" + traceback.format_exc())
+        raise  # Let Streamlit show the friendly “Oops!” message
 
 # ── STREAMLIT PAGE ──────────────────────────────────────────────────────────
 st.set_page_config("Bud Bot", "🤖", layout="centered")
