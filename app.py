@@ -1,24 +1,13 @@
-# app.py – Bud Chat Bot (Streamlit)
-# -----------------------------------------------------------------------------
-# Kid‑friendly chatbot with:
-#   • Greeting replies (hi/hello/hey…)
-#   • Excel Q&A lookup
-#   • PDF vector search (FAISS) + Groq Llama‑3 answers
-#   • Plain Groq fallback
-#   • Works on Streamlit Cloud (port 8501) – fileWatcherType set to "poll".
-# -----------------------------------------------------------------------------
+# app.py — Bud Chat Bot (Streamlit + Groq + PDF + Excel)
+# -------------------------------------------------------------------------
+# Kid‑friendly chatbot with colorful layout and rounded chat bubbles 😊
+# Answers from Excel, PDF (vector), or fallback to Groq (Llama3).
+# -------------------------------------------------------------------------
 
-# ── ENV FIX FOR STREAMLIT CLOUD ──────────────────────────────────────────────
-# Must be set *before* importing streamlit so the watcher limit isn’t hit.
-import os
-os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "poll")  # safer than inotify
-
-# ── STANDARD LIB ────────────────────────────────────────────────────────────
-import re, string, logging, uuid, traceback
+import os, re, string, logging, uuid, traceback
 from difflib import get_close_matches
-from datetime import datetime  # (kept for future logging if needed)
+from datetime import datetime
 
-# ── THIRD‑PARTY ─────────────────────────────────────────────────────────────
 import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
@@ -32,18 +21,18 @@ from langchain.chains import create_retrieval_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.embeddings.base import Embeddings
 
-# ── ENV & LOG ───────────────────────────────────────────────────────────────
+# ── ENV & LOG ─────────────────────────────────────────────────────────────
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
-BOT_NAME   = os.getenv("BOT_NAME", "Bud")
-BOT_TONE   = os.getenv("BOT_TONE", "friendly").lower()
-GROQ_KEY   = os.getenv("GROQ_API_KEY", "")
-HF_TOKEN   = os.getenv("HF_TOKEN")
+BOT_NAME = os.getenv("BOT_NAME", "Bud")
+BOT_TONE = os.getenv("BOT_TONE", "friendly").lower()
+GROQ_KEY = os.getenv("GROQ_API_KEY", "")
+HF_TOKEN = os.getenv("HF_TOKEN")
 UPLOAD_DIR = "data"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ── PROMPT HELPER ───────────────────────────────────────────────────────────
+# ── PROMPT STYLE ──────────────────────────────────────────────────────────
 TONE_INSTRUCTION = {
     "academic": "You are a scholarly assistant. Answer formally and precisely.",
     "kids":     "You are a patient teacher for kids. Use simple words and friendly emojis.",
@@ -57,7 +46,7 @@ PROMPT = ChatPromptTemplate.from_template(
     "<context>{{context}}</context>\nQuestion: {{input}}"
 )
 
-# ── LLM ─────────────────────────────────────────────────────────────────────
+# ── LLM ────────────────────────────────────────────────────────────────────
 llm = None
 if GROQ_KEY:
     llm = ChatGroq(
@@ -67,12 +56,9 @@ if GROQ_KEY:
         max_tokens=256,
     )
     logging.info("✅ Groq client ready")
-else:
-    logging.warning("🚨 GROQ_API_KEY missing – fallback answers will be unavailable!")
 
-# ── EMBEDDINGS WRAPPER ──────────────────────────────────────────────────────
+# ── EMBEDDING MODEL ────────────────────────────────────────────────────────
 class STEmbeddings(Embeddings):
-    """Sentence‑Transformers wrapper for LangChain."""
     def __init__(self, model="all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(model, cache_folder="models", use_auth_token=HF_TOKEN)
 
@@ -82,46 +68,34 @@ class STEmbeddings(Embeddings):
     def embed_query(self, text):
         return self.model.encode([text])[0]
 
-# ── HELPER: NORMALISE TEXT ──────────────────────────────────────────────────
-
-def normalize(text: str) -> str:
-    """Lowercase, trim, and strip punctuation so lookups are easy."""
-    return re.sub(rf"[{re.escape(string.punctuation)}]", "", text.lower().strip())
-
-# ── CACHED LOADERS ──────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="🔍 Building PDF index…")
+# ── LOAD PDF & EXCEL ───────────────────────────────────────────────────────
+@st.cache_resource(show_spinner="🔍 Indexing PDFs...")
 def load_vectors():
-    """Load PDFs from UPLOAD_DIR and create a FAISS vector store."""
     docs = PyPDFDirectoryLoader(UPLOAD_DIR).load()
     if not docs:
         return None
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-    chunks = splitter.split_documents(docs)
+    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100).split_documents(docs)
     return FAISS.from_documents(chunks, STEmbeddings())
 
-@st.cache_resource(show_spinner="📖 Loading Excel Q&A…")
+@st.cache_resource(show_spinner="📖 Reading Excel Q&A...")
 def load_qa(path=os.path.join(UPLOAD_DIR, "questions_answers.xlsx")):
-    """Load an Excel file where column 0 is Q and column 1 is A."""
     if not os.path.exists(path):
         return {}
     df = pd.read_excel(path)
-    if df.shape[1] < 2:
-        logging.warning("Excel file needs at least two columns (Q & A).")
-        return {}
-    df.iloc[:, 0] = (
-        df.iloc[:, 0].astype(str)
-        .str.replace(f"[{re.escape(string.punctuation)}]", "", regex=True)
-        .str.lower()
-    )
+    df.iloc[:, 0] = (df.iloc[:, 0].astype(str)
+                     .str.replace(f"[{re.escape(string.punctuation)}]", "", regex=True)
+                     .str.lower())
     return dict(zip(df.iloc[:, 0], df.iloc[:, 1]))
 
 VECTORS = load_vectors()
 QA_DATA = load_qa()
 
-# ── ANSWER FUNCTION ─────────────────────────────────────────────────────────
+# ── CLEANING FUNCTION ──────────────────────────────────────────────────────
+def normalize(text: str) -> str:
+    return re.sub(rf"[{re.escape(string.punctuation)}]", "", text.lower().strip())
 
+# ── ANSWER LOGIC ───────────────────────────────────────────────────────────
 def answer(q: str) -> str:
-    """Route the user question to greetings, identity, Excel, PDF+LLM, or fallback."""
     try:
         if not q:
             return ""
@@ -133,20 +107,20 @@ def answer(q: str) -> str:
         if q_norm in greetings:
             return "👋 Hi there! How can I help you today?"
 
-        # 1️⃣🅱️ Identity / "Who are you?"
-        if re.search(r"(who (are|r) (you|u)|what('?s| is) your name|introduce yourself)", q_norm):
-            return f"😊 Hi! I’m {BOT_NAME}, your friendly chatbot assistant."
+        # 2️⃣ Identity
+        if re.search(r"\b(who (are|r) (you|u)|what('?s| is) your name|introduce yourself)\b", q_norm):
+            return f"😊 I’m **{BOT_NAME}**, your friendly chatbot buddy! Ask me anything."
 
-        # 2️⃣ Excel exact match
+        # 3️⃣ Excel direct match
         if q_norm in QA_DATA:
-            return str(QA_DATA[q_norm])
+            return QA_DATA[q_norm]
 
-        # 3️⃣ Excel close match
+        # 4️⃣ Excel close match
         close = get_close_matches(q_norm, QA_DATA.keys(), n=1, cutoff=0.85)
         if close:
-            return str(QA_DATA[close[0]])
+            return QA_DATA[close[0]]
 
-        # 4️⃣ PDF vector + Groq
+        # 5️⃣ PDF vector + Groq
         if VECTORS and llm:
             chain = create_retrieval_chain(
                 retriever=VECTORS.as_retriever(k=4),
@@ -157,72 +131,63 @@ def answer(q: str) -> str:
             if ans and "I don't know" not in ans:
                 return ans
 
-        # 5️⃣ Plain Groq fallback (no PDF context)
+        # 6️⃣ Groq fallback
         if llm:
-            ans = llm.invoke(PROMPT.format(context="", input=q)).strip()
-            return ans
+            prompt = PROMPT.format(context="", input=q)
+            raw = llm.invoke(prompt)
+            return raw.strip()
 
-        # 6️⃣ Ultimate fallback
         return "🤷‍♂️ Sorry, I don’t have an answer for that right now."
 
     except Exception:
-        logging.error("answer() crashed:
-" + traceback.format_exc())
-        raise  # Let outer try/except show the friendly message
+        logging.error("answer() crashed:\n" + traceback.format_exc())
+        raise  # Let Streamlit show “Oops! I got confused.”
 
-# ── STREAMLIT PAGE ──────────────────────────────────────────────────────────
+# ── STREAMLIT UI ───────────────────────────────────────────────────────────
 st.set_page_config("Bud Bot", "🤖", layout="centered")
 
-# Header
 st.image("https://i.imgur.com/nb3G9p6.png", width=110)
-st.markdown(
-    "<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1>"
-    "<p style='text-align:center;'>Ask me anything in a friendly way!</p>",
-    unsafe_allow_html=True,
-)
+st.markdown("<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'>Ask me anything in a friendly way!</p>", unsafe_allow_html=True)
 st.divider()
 
-# Layout: chat left, upload right
-col_chat, col_up = st.columns([3, 1])
+col_chat, col_up = st.columns([3,1])
 
 with col_chat:
     q = st.text_input("🧏🏼‍♂️ Type your question here:", key="input")
     if st.button("Ask", type="primary") and q:
-        st.chat_message("user").markdown(q)
-        try:
-            reply = answer(q)
-        except Exception:
-            reply = "Oops! I got confused. Try again?"
-        st.chat_message("assistant").markdown(reply)
+        with st.spinner("Thinking…"):
+            st.chat_message("user").markdown(q)
+            try:
+                reply = answer(q)
+            except Exception:
+                reply = "Oops! I got confused. Try again?"
+            st.chat_message("assistant").markdown(reply)
 
 with col_up:
     st.write("📗 **Add PDFs**")
     pdf = st.file_uploader(" ", type="pdf", label_visibility="collapsed")
     if pdf:
         uid = f"{uuid.uuid4()}.pdf"
-        with open(os.path.join(UPLOAD_DIR, uid), "wb") as f:
-            f.write(pdf.read())
-        load_vectors.clear()  # Rebuild cache next time
+        open(os.path.join(UPLOAD_DIR, uid), "wb").write(pdf.read())
+        load_vectors.clear()
         st.success("PDF uploaded! Vector index will rebuild on next question.")
 
-# Quick‑ask examples
+# Quick examples
 quick = ["Who are you?", "Tell me a fun fact!", "How do planes fly?"]
-links = " | ".join(f"🟢 [{x}](?q={x.replace(' ', '%20')})" for x in quick)
-st.markdown(f"**Try one:** {links}")
+st.markdown("**Try one:** " + " | ".join(f"🟢 [{x}](?q={x.replace(' ','%20')})" for x in quick))
 
-# CSS tweaks
-st.markdown(
-    """
+# CSS styling
+st.markdown("""
 <style>
 .stChatMessage {border-radius:18px!important;}
 footer {visibility:hidden;}
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
-# Handle quick‑ask query param (so links auto‑fill input)
+# Handle ?q=... in URL
 params = st.experimental_get_query_params()
-if not q and (val := params.get("q")):
-    st.session_state.input = val[0] if isinstance(val, list) else str(val)
+param_q = params.get("q")
+if q == "" and param_q:
+    val = param_q[0] if isinstance(param_q, list) else str(param_q)
+    st.session_state.input = val
     st.rerun()
