@@ -2,9 +2,9 @@
 # -------------------------------------------------------------------------
 # 🧒 Kid‑friendly chatbot with colorful layout and rounded chat bubbles 😊
 # New in this version ✨
-#   • Keeps *separate* chat histories (just like ChatGPT)
-#   • Sidebar lets you switch or start a brand‑new chat
-#   • All past messages re‑render when you open a chat
+#   • st.chat_input() → shows the neat arrow send‑button (like ChatGPT)
+#   • First user question automatically renames the chat from “New Chat”
+#   • Sidebar lists recent chats as clickable buttons, newest first
 #   • Same answer pipeline: Excel → PDF → Groq fallback
 # -------------------------------------------------------------------------
 
@@ -90,9 +90,12 @@ def load_qa(path=os.path.join(UPLOAD_DIR, "questions_answers.xlsx")):
     if not os.path.exists(path):
         return {}
     df = pd.read_excel(path)
-    df.iloc[:, 0] = (df.iloc[:, 0].astype(str)
-                     .str.replace(f"[{re.escape(string.punctuation)}]", "", regex=True)
-                     .str.lower())
+    df.iloc[:, 0] = (
+        df.iloc[:, 0]
+        .astype(str)
+        .str.replace(f"[{re.escape(string.punctuation)}]", "", regex=True)
+        .str.lower()
+    )
     return dict(zip(df.iloc[:, 0], df.iloc[:, 1]))
 
 VECTORS = load_vectors()
@@ -100,7 +103,7 @@ QA_DATA = load_qa()
 
 # ── CHAT SESSION HELPERS ──────────────────────────────────────────────────
 
-def load_all_sessions() -> dict[str, list[dict[str,str]]]:
+def load_all_sessions() -> dict[str, list[dict[str, str]]]:
     """Return saved sessions from disk or a default starter."""
     if SESSIONS_PATH.exists():
         try:
@@ -110,7 +113,7 @@ def load_all_sessions() -> dict[str, list[dict[str,str]]]:
     return {"New Chat": []}
 
 
-def save_sessions(sessions: dict[str, list[dict[str,str]]]):
+def save_sessions(sessions: dict[str, list[dict[str, str]]]):
     """Persist sessions to disk."""
     SESSIONS_PATH.write_text(json.dumps(sessions))
 
@@ -128,7 +131,7 @@ def answer(q: str) -> str:
 
         q_norm = normalize(q)
 
-        #1️⃣ Greetings
+        # 1️⃣ Greetings
         greetings = {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}
         if q_norm in greetings:
             return "👋 Hi there! How can I help you today?"
@@ -186,30 +189,27 @@ if "current" not in st.session_state:
 with st.sidebar:
     st.header("💬 Chats")
 
-    # Select existing chat
-    session_names = list(st.session_state.sessions.keys())
-    choice = st.selectbox("Choose a chat", session_names, index=session_names.index(st.session_state.current))
-    if choice != st.session_state.current:
-        st.session_state.current = choice
-        st.experimental_rerun()
-
-    # Create new chat
-    new_name = st.text_input("Start a new chat", "", placeholder="e.g. Homework helper")
-    if st.button("➕ Create") and new_name:
-        if new_name in st.session_state.sessions:
-            st.warning("That name already exists!")
-        else:
-            st.session_state.sessions[new_name] = []
-            st.session_state.current = new_name
-            save_sessions(st.session_state.sessions)
-            st.experimental_rerun()
-
-    # Delete chat (keep at least one)
-    if st.button("🗑️ Delete current chat") and len(st.session_state.sessions) > 1:
-        del st.session_state.sessions[st.session_state.current]
-        st.session_state.current = list(st.session_state.sessions.keys())[0]
+    # New chat button
+    if st.button("➕ New Chat"):
+        base = "New Chat"
+        name = base
+        i = 1
+        while name in st.session_state.sessions:
+            i += 1
+            name = f"{base} {i}"
+        st.session_state.sessions[name] = []
+        st.session_state.current = name
         save_sessions(st.session_state.sessions)
         st.experimental_rerun()
+
+    st.markdown("---")
+
+    # List chats, newest first
+    for name in reversed(list(st.session_state.sessions.keys())):
+        button_label = f"➡️ {name}" if name != st.session_state.current else f"🟢 {name}"
+        if st.button(button_label, key=f"chat-{name}"):
+            st.session_state.current = name
+            st.experimental_rerun()
 
     st.markdown("---")
     st.write("📗 **Add PDFs to knowledge base**")
@@ -229,52 +229,84 @@ st.image(
     "https://s.tmimgcdn.com/scr/1200x750/153700/business-analytics-logo-template_153739-original.jpg",
     width=60,
 )
-st.markdown("<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'>Ask me anything in a friendly way!</p>", unsafe_allow_html=True)
+st.markdown(
+    "<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'>Ask me anything in a friendly way!</p>",
+    unsafe_allow_html=True,
+)
 st.divider()
 
 # Show chat history
 for msg in st.session_state.sessions[st.session_state.current]:
     st.chat_message(msg["role"]).markdown(msg["content"])
 
-# Question input
-q = st.text_input("🧏🏼‍♂️ Type your question here:", key="input", placeholder="Ask your question…", label_visibility="collapsed")
-ask_col, blank = st.columns([1,5])
-if ask_col.button("Ask", type="primary") and q:
+# ─── Question input (now with built‑in arrow) ─────────────────────────────
+
+q = st.chat_input("Ask me anything…")
+
+if q:
     with st.spinner("Thinking…"):
         # Display user message
         st.chat_message("user").markdown(q)
-        st.session_state.sessions[st.session_state.current].append({"role": "user", "content": q})
+        st.session_state.sessions[st.session_state.current].append(
+            {"role": "user", "content": q, "time": datetime.now().isoformat()}
+        )
+
+        # Rename chat if it was still “New Chat”
+        if st.session_state.current.startswith("New Chat"):
+            raw_title = re.sub(r"\s+", " ", q.strip()).title()[:40] or "Untitled"
+            title = raw_title
+            base = raw_title
+            i = 1
+            while title in st.session_state.sessions:
+                i += 1
+                title = f"{base} ({i})"
+            st.session_state.sessions[title] = st.session_state.sessions.pop(st.session_state.current)
+            st.session_state.current = title
 
         # Get answer
         try:
             reply = answer(q)
         except Exception:
             reply = "Oops! I got confused. Try again?"
+
         st.chat_message("assistant").markdown(reply)
-        st.session_state.sessions[st.session_state.current].append({"role": "assistant", "content": reply})
+        st.session_state.sessions[st.session_state.current].append(
+            {"role": "assistant", "content": reply, "time": datetime.now().isoformat()}
+        )
         save_sessions(st.session_state.sessions)
-        st.session_state.input = ""  # clear box
         st.experimental_rerun()
 
-# Quick examples under input
+# ─── Quick example links ─────────────────────────────────────────────────
+
 quick = ["Who are you?", "Tell me a fun fact!", "How do planes fly?"]
 st.markdown("**Try one:** " + " | ".join(f"🟢 [{x}](?q={x.replace(' ','%20')})" for x in quick))
 
-# CSS tweaks for rounded bubbles
+# ─── CSS tweaks for bubbles & arrow ───────────────────────────────────────
+
 st.markdown(
     """
     <style>
     .stChatMessage {border-radius:18px!important;}
+    /* style for the arrow send‑button */
+    button[kind="secondary"] svg {width:20px;height:20px;}
+    button[kind="secondary"] {
+        background:#00B7FF!important;
+        color:white!important;
+        border-radius:50%!important;
+        padding:14px!important;
+    }
     footer {visibility:hidden;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# Handle ?q=... in URL (prefill input)
+# ─── Handle ?q=... in URL (prefill input) ────────────────────────────────
+
 params = st.experimental_get_query_params()
 param_q = params.get("q")
-if q == "" and param_q:
-    val = param_q[0] if isinstance(param_q, list) else str(param_q)
-    st.session_state.input = val
-    st.rerun()
+if param_q:
+    st.experimental_set_query_params()  # clear it so it doesn't loop
+    st.session_state._on_chat_input_state_change = None  # hack: avoid key collision
+    st.chat_input("Ask me anything…", key="unique_prefill_key", disabled=True)
+    st.info("➡️ Click the green example link again if nothing happened ✨")
