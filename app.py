@@ -1,5 +1,5 @@
 # app.py – Bud Chat Bot (Streamlit + Groq + PDF + Excel)
-# Added avatar support (kid.png for user, bot.png for assistant)
+# Shortened comments to fit.
 
 from __future__ import annotations
 import os, re, string, logging, uuid, traceback, json
@@ -8,8 +8,10 @@ from datetime import datetime
 from pathlib import Path
 import streamlit as st
 
-# rerun helper
-_rerun = (lambda: (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)())
+# rerun helper (works on all Streamlit versions)
+
+def _rerun():
+    (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)()
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -32,10 +34,6 @@ GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 HF_TOKEN = os.getenv("HF_TOKEN")
 UPLOAD_DIR = "data"; os.makedirs(UPLOAD_DIR, exist_ok=True)
 SESSIONS_PATH = Path("chat_sessions.json")
-
-# avatars (make sure these files exist in the same folder as app.py)
-USER_AVATAR = "kid.png"
-BOT_AVATAR = "bot.png"
 
 TONE_INSTRUCTION = {
     "academic": "You are a scholarly assistant.",
@@ -62,7 +60,7 @@ class STEmbeddings(Embeddings):
 
 @st.cache_resource(show_spinner="📄 Building PDF index…")
 def load_vectors():
-    docs = PyPDFDirectoryLoader(UPLOAD_DIR).load()
+    docs = PyPDFDirectoryLoader(UPLOAD_DIR).load();
     if not docs: return None
     chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100).split_documents(docs)
     return FAISS.from_documents(chunks, STEmbeddings())
@@ -88,7 +86,7 @@ def save_sessions(s): SESSIONS_PATH.write_text(json.dumps(s))
 
 def normalize(t): return re.sub(rf"[{re.escape(string.punctuation)}]", "", t.lower().strip())
 
-# answer engine (unchanged)
+# answer
 
 def answer(q):
     try:
@@ -115,7 +113,7 @@ st.set_page_config("Bud Bot","🤖",layout="centered")
 if "sessions" not in st.session_state: st.session_state.sessions = load_all_sessions()
 if "current" not in st.session_state: st.session_state.current = list(st.session_state.sessions.keys())[0]
 
-# sidebar (unchanged)
+# sidebar
 with st.sidebar:
     st.header("💬 Chats")
     if st.button("➕ New Chat"):
@@ -133,24 +131,18 @@ with st.sidebar:
         uid=f"{uuid.uuid4()}.pdf"; open(f"{UPLOAD_DIR}/{uid}","wb").write(pdf.read()); load_vectors.clear(); st.success("PDF saved! I’ll learn from it after your next question.")
     st.caption("Chats are stored locally in chat_sessions.json")
 
-# main area header
+# main area
 st.image("https://s.tmimgcdn.com/scr/1200x750/153700/business-analytics-logo-template_153739-original.jpg",width=60)
 st.markdown("<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'>Ask me anything!</p>",unsafe_allow_html=True)
 st.divider()
-
-# chat history with avatars
 for m in st.session_state.sessions[st.session_state.current]:
-    avatar = USER_AVATAR if m["role"]=="user" else BOT_AVATAR
-    st.chat_message(m["role"], avatar=avatar).markdown(m["content"])
+    st.chat_message(m["role"]).markdown(m["content"])
 
-# new question
 q=st.chat_input("Ask me anything…")
 if q:
     with st.spinner("Thinking…"):
-        # show user message with avatar
-        st.chat_message("user", avatar=USER_AVATAR).markdown(q)
+        st.chat_message("user").markdown(q)
         st.session_state.sessions[st.session_state.current].append({"role":"user","content":q,"time":datetime.now().isoformat()})
-        # rename chat if still default
         if st.session_state.current.startswith("New Chat"):
             raw=re.sub("\s+"," ",q.strip()).title()[:40] or "Untitled"; title=raw; base=raw; i=1
             while title in st.session_state.sessions: i+=1; title=f"{base} ({i})"
@@ -159,24 +151,15 @@ if q:
             reply=answer(q)
         except Exception:
             reply="Oops! I got confused. Try again?"
-        st.chat_message("assistant", avatar=BOT_AVATAR).markdown(reply)
+        st.chat_message("assistant").markdown(reply)
         st.session_state.sessions[st.session_state.current].append({"role":"assistant","content":reply,"time":datetime.now().isoformat()})
         save_sessions(st.session_state.sessions); _rerun()
 
-# quick examples
 quick=["Who are you?","Tell me a fun fact!","How do planes fly?"]
 st.markdown("**Try one:** "+" | ".join(f"🟢 [{x}](?q={x.replace(' ','%20')})" for x in quick))
 
-# CSS tweaks for avatars and bubbles
-st.markdown("""<style>
-.stChatMessage{border-radius:18px!important;}
-img[alt='avatar']{border-radius:50%;width:42px;height:42px;}
-button[kind='secondary'] svg{width:20px;height:20px;}
-button[kind='secondary']{background:#00B7FF!important;color:white!important;border-radius:50%!important;padding:14px!important;}
-footer{visibility:hidden;}
-</style>""",unsafe_allow_html=True)
+st.markdown("""<style>.stChatMessage{border-radius:18px!important;}button[kind='secondary'] svg{width:20px;height:20px;}button[kind='secondary']{background:#00B7FF!important;color:white!important;border-radius:50%!important;padding:14px!important;}footer{visibility:hidden;}</style>""",unsafe_allow_html=True)
 
-# URL prefill handler
-params=st.experimental_get_query_params()
+params=st.experimental_get_query_params();
 if not q and params.get("q"):
-    st.experimental_set
+    st.experimental_set_query_params(); st.session_state.input=params["q"][0]; _rerun()
