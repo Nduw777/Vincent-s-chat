@@ -14,7 +14,11 @@ import pandas as pd
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI  # OpenAI wrapper
+# OpenAI wrapper (provider‑split or legacy)
+try:
+    from langchain_openai import ChatOpenAI  # LangChain ≥ 0.2 provider package
+except ModuleNotFoundError:
+    from langchain.chat_models import ChatOpenAI  # fallback for LangChain 0.1.x
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_community.vectorstores import FAISS
@@ -134,7 +138,7 @@ def answer(q: str) -> str:
 
         # Small‑talk & identity
         if q_clean in {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"} or GREET_RX.search(q_clean):
-            return "😊 I'm just happy computer code, thanks for asking! How can I help you today?"
+            return "😊 I'm Baho bot_Ndvt, thanks for asking! How can I help you today?"
         if re.search(r"\b(who (are|r) (you|u)|what('?s| is) your name|introduce yourself)\b", q_clean):
             return f"😊 I’m **{BOT_NAME}**, your friendly chatbot buddy!"
 
