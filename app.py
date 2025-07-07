@@ -171,6 +171,13 @@ def answer(q: str) -> str:
     except Exception:
         logging.error("answer() crashed:\n" + traceback.format_exc())
         raise  # Let Streamlit show “Oops! I got confused.”
+      # 🔄 Works with BOTH old and new Streamlit builds
+def _rerun():
+    """Reload the page no matter which Streamlit version is installed."""
+    if hasattr(st, "rerun"):          # Streamlit ≥ 1.27
+        st.rerun()
+    else:                             # Streamlit 1.21 – 1.26
+        st.experimental_rerun()
 
 # ── STREAMLIT UI ───────────────────────────────────────────────────────────
 
