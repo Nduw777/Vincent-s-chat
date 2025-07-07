@@ -14,7 +14,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI  # <‑‑ NEW: OpenAI wrapper
+from langchain_openai import ChatOpenAI  # OpenAI wrapper
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_community.vectorstores import FAISS
@@ -26,6 +26,7 @@ from langchain.embeddings.base import Embeddings
 # ------------------------------ helpers --------------------------------------
 
 def _rerun():
+    """Safely rerun Streamlit app across versions."""
     (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)()
 
 def normalize(text: str) -> str:
@@ -36,12 +37,13 @@ GREET_RX = re.compile(r"\b(how (are|r) you( doing)?|how'?s it going|what'?s up)\
 # ------------------------------ env & constants ------------------------------
 
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s | %(levelname)s | %(message)s")
 
 BOT_NAME   = os.getenv("BOT_NAME", "Bud")
 BOT_TONE   = os.getenv("BOT_TONE", "kids").lower()
 GROQ_KEY   = os.getenv("GROQ_API_KEY", "")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")  # <‑‑ NEW
+OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
 HF_TOKEN   = os.getenv("HF_TOKEN")
 UPLOAD_DIR = "data"; os.makedirs(UPLOAD_DIR, exist_ok=True)
 SESSIONS_PATH = Path("chat_sessions.json")
@@ -67,7 +69,7 @@ FREE_PROMPT = ChatPromptTemplate.from_template(
 # ------------------------------ LLM factory ----------------------------------
 
 def make_llm():
-    """Return a ChatGroq, ChatOpenAI, or None depending on available keys."""
+    """Return an LLM client based on available API keys."""
     if GROQ_KEY:
         logging.info("Using Groq Llama‑3 via GROQ_API_KEY")
         return ChatGroq(groq_api_key=GROQ_KEY,
@@ -76,13 +78,12 @@ def make_llm():
                         max_tokens=256)
     if OPENAI_KEY:
         logging.info("Using OpenAI ChatGPT via OPENAI_API_KEY")
-        # Choose the best model you have access to; fallback to 3.5 turbo.
         model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
         return ChatOpenAI(openai_api_key=OPENAI_KEY,
                           model_name=model,
                           temperature=0.3,
                           max_tokens=256)
-    logging.warning("No GROQ_API_KEY or OPENAI_API_KEY found – LLM disabled")
+    logging.warning("No LLM API key found – reasoning fallback disabled")
     return None
 
 llm = make_llm()
@@ -90,6 +91,7 @@ llm = make_llm()
 # ------------------------------ embeddings -----------------------------------
 
 class STEmbeddings(Embeddings):
+    """SentenceTransformer wrapper to match LangChain Embeddings interface."""
     def __init__(self, model="all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(model, cache_folder="models", use_auth_token=HF_TOKEN)
     def embed_documents(self, texts):
@@ -120,7 +122,7 @@ def load_qa_vectors(path=f"{UPLOAD_DIR}/questions_answers.xlsx"):
 
 PDF_VS = load_pdf_vectors()
 QA_VS, QA_ANSWERS = load_qa_vectors()
-SIM_THRESHOLD = 0.25  # smaller = stricter match
+SIM_THRESHOLD = 0.25  # lower = stricter match
 
 # ------------------------------ answer logic ---------------------------------
 
@@ -163,58 +165,24 @@ def answer(q: str) -> str:
         logging.error("answer() crashed:\n" + traceback.format_exc())
         return "⚠️ Oops, something went wrong. Please try again."
 
-# ------------------------------ UI (unchanged) -------------------------------
+# ------------------------------ Streamlit UI ---------------------------------
 
 st.set_page_config("Bud Bot", "🤖", layout="centered")
+
+# Load / init session storage
+loaded_sessions = json.loads(SESSIONS_PATH.read_text()) if SESSIONS_PATH.exists() else {"New Chat": []}
 if "sessions" not in st.session_state:
-    st.session_state.sessions = (json.loads(SESSIONS_PATH.read_text()) if SESSIONS_PATH.exists() else {"New Chat": []})
+    st.session_state.sessions = loaded_sessions
 if "current" not in st.session_state:
     st.session_state.current = list(st.session_state.sessions.keys())[0]
 
+# ----- SIDEBAR ---------------------------------------------------------------
 with st.sidebar:
     st.header("💻 Chats")
+
+    # New chat button
     if st.button("➕ New Chat"):
         n, i = "New Chat", 1
         while n in st.session_state.sessions:
             i += 1; n = f"New Chat {i}"
-        st.session_state.sessions[n] = []
-        st.session_state.current = n
-        json.dump(st.session_state.sessions, open(SESSIONS_PATH, "w"))
-        _rerun()
-    st.markdown("---")
-    for n in reversed(list(st.session_state.sessions.keys())):
-        if st.button(("🟢 " if n == st.session_state.current else "➡️ ") + n, key=f"btn-{n}"):
-            st.session_state.current = n
-            _rerun()
-    st.markdown("---")
-    st.write("📗 **Add PDFs to knowledge base**")
-    pdf = st.file_uploader("Upload a PDF", type="pdf")
-    if pdf:
-        uid = f"{uuid.uuid4()}.pdf"
-        open(f"{UPLOAD_DIR}/{uid}", "wb").write(pdf.read())
-        load_pdf_vectors.clear()
-        st.success("PDF saved! I’ll learn from it after your next question.")
-    st.caption("Chats are stored locally in chat_sessions.json")
-
-st.image("https://s.tmimgcdn.com/scr/1200x750/153700/business-analytics-logo-template_153739-original.jpg", width=60)
-
-st.markdown("""
-<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1>
-<p style='text-align:center;'>Most Welcome to you ask me about Kepler college!</p>
-""", unsafe_allow_html=True)
-
-st.divider()
-for m in st.session_state.sessions[st.session_state.current]:
-    st.chat_message(m["role"]).markdown(m["content"])
-
-q = st.chat_input("Ask me anything…")
-if q:
-    with st.spinner("Thinking…"):
-        st.chat_message("user").markdown(q)
-        st.session_state.sessions[st.session_state.current].append({"role": "user", "content": q, "time": datetime.now().isoformat()})
-        if st.session_state.current.startswith("New Chat"):
-            raw = re.sub("\s+", " ", q.strip()).title()[:40] or "Untitled"
-            title, base, i = raw, raw, 1
-            while title in st.session_state.sessions:
-                i += 1; title = f"{base} ({i})"
-            st.session_state.sessions[title] = st.session_state.sessions.pop(st.session_state
+        st.session_state.sessions[n]
