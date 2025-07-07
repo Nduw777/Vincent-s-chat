@@ -1,10 +1,10 @@
 # app.py — Bud Chat Bot (Streamlit + Groq + PDF + Excel)
 # -------------------------------------------------------------------------
 # 🧒 Kid‑friendly chatbot with colorful layout and rounded chat bubbles 😊
-# New in this version ✨
-#   • st.chat_input() → shows the neat arrow send‑button (like ChatGPT)
-#   • First user question automatically renames the chat from “New Chat”
+#   • st.chat_input() → arrow send button (ChatGPT‑style)
+#   • First user question renames the chat from “New Chat” automatically
 #   • Sidebar lists recent chats as clickable buttons, newest first
+#   • Added _rerun() helper so the code works on BOTH old & new Streamlit builds
 #   • Same answer pipeline: Excel → PDF → Groq fallback
 # -------------------------------------------------------------------------
 
@@ -16,6 +16,17 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+
+# 🔄 Helper so the app can reload itself no matter which Streamlit version
+# you have (old versions used st.experimental_rerun, new ones use st.rerun).
+
+def _rerun():
+    """Reload the app regardless of Streamlit version."""
+    if hasattr(st, "rerun"):
+        st.rerun()                     # Streamlit ≥ 1.27
+    else:
+        st.experimental_rerun()        # Streamlit 1.21 – 1.26
+
 import pandas as pd
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
@@ -30,7 +41,8 @@ from langchain.embeddings.base import Embeddings
 
 # ── ENV & LOG ─────────────────────────────────────────────────────────────
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s | %(levelname)s | %(message)s")
 
 BOT_NAME = os.getenv("BOT_NAME", "Bud")
 BOT_TONE = os.getenv("BOT_TONE", "kids").lower()  # default to kid tone
@@ -171,13 +183,6 @@ def answer(q: str) -> str:
     except Exception:
         logging.error("answer() crashed:\n" + traceback.format_exc())
         raise  # Let Streamlit show “Oops! I got confused.”
-      # 🔄 Works with BOTH old and new Streamlit builds
-def _rerun():
-    """Reload the page no matter which Streamlit version is installed."""
-    if hasattr(st, "rerun"):          # Streamlit ≥ 1.27
-        st.rerun()
-    else:                             # Streamlit 1.21 – 1.26
-        st.experimental_rerun()
 
 # ── STREAMLIT UI ───────────────────────────────────────────────────────────
 
@@ -196,7 +201,7 @@ if "current" not in st.session_state:
 with st.sidebar:
     st.header("💬 Chats")
 
-    # New chat button
+    # ➕ New Chat button
     if st.button("➕ New Chat"):
         base = "New Chat"
         name = base
@@ -207,7 +212,7 @@ with st.sidebar:
         st.session_state.sessions[name] = []
         st.session_state.current = name
         save_sessions(st.session_state.sessions)
-        st.experimental_rerun()
+        _rerun()
 
     st.markdown("---")
 
