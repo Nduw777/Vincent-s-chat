@@ -133,7 +133,7 @@ with st.sidebar:
 
 # main area
 st.image("https://s.tmimgcdn.com/scr/1200x750/153700/business-analytics-logo-template_153739-original.jpg",width=60)
-st.markdown("<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'>Ask me anything!</p>",unsafe_allow_html=True)
+st.markdown("<h1 style='text-align:center;color:#00B7FF;'>🤖 Bud Chat Bot</h1><p style='text-align:center;'> Most Welcome to you ask me about Kepler college !</p>",unsafe_allow_html=True)
 st.divider()
 for m in st.session_state.sessions[st.session_state.current]:
     st.chat_message(m["role"]).markdown(m["content"])
