@@ -1,4 +1,4 @@
-# app.py – Bud Chat Bot (Streamlit + Groq + PDF + Excel + Free‑Reasoning)
+# app.py – Baho Chat Bot_Ndvt (Streamlit + Groq + PDF + Excel + Free‑Reasoning)
 # -----------------------------------------------------------------------------
 # This version lets Bud:       1) search Excel semantically      2) use PDF RAG
 #                              3) reason freely when docs fail   4) keep kid tone
@@ -156,7 +156,7 @@ def answer(q: str) -> str:
 
 # ------------------------------ UI -------------------------------------------
 
-st.set_page_config("Bud Bot", "🤖", layout="centered")
+st.set_page_config("Baho Bot_Ndvt", "🤖", layout="centered")
 
 if "sessions" not in st.session_state:
     st.session_state.sessions = (json.loads(SESSIONS_PATH.read_text())
