@@ -115,7 +115,7 @@ if "current" not in st.session_state: st.session_state.current = list(st.session
 
 # sidebar
 with st.sidebar:
-    st.header("💬 Chats")
+    st.header("💻 Chats")
     if st.button("➕ New Chat"):
         n="New Chat"; i=1
         while n in st.session_state.sessions: i+=1; n=f"New Chat {i}"
