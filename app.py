@@ -1,15 +1,34 @@
-# app.py – Bud Chat Bot (Streamlit + Groq **or** OpenAI)
-# -----------------------------------------------------------------------------
-# Chooses Groq‑hosted Llama‑3 if GROQ_API_KEY is set, otherwise falls back to
-# OpenAI ChatGPT (gpt‑3.5‑turbo or gpt‑4o) when OPENAI_API_KEY is present.
-# -----------------------------------------------------------------------------
+"""
+Bud Chat Bot – Streamlit + Groq / OpenAI
+-------------------------------------------------
+A simple, kid‑friendly chatbot that can:
+1.  Answer questions with plain reasoning (Llama‑3 or GPT‑3.5/4o).
+2.  Retrieve answers from uploaded PDFs (basic RAG).
+3.  Pull Q&A pairs from an Excel file for instant replies.
 
+Extra goodies:
+* Multiple chat sessions saved to disk (JSON).
+* "➕ New Chat" button works.
+* Clean chat UI with st.chat_message + st.chat_input.
+* Auto‑save after each user turn.
+
+Place any PDFs in the **data/** folder and (optionally) an
+Excel file called **questions_answers.xlsx** with two columns:
+| Question | Answer |
+
+-------------------------------------------------
+Run with:
+    streamlit run app.py
+"""
 from __future__ import annotations
-import os, re, string, logging, uuid, traceback, json
+
+# ------------------------------ stdlib ---------------------------------------
+import json, logging, os, re, string, traceback, uuid
 from datetime import datetime
 from pathlib import Path
-import streamlit as st
 
+# ------------------------------ 3rd‑party ------------------------------------
+import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
@@ -173,20 +192,71 @@ def answer(q: str) -> str:
 
 st.set_page_config("Bud Bot", "🤖", layout="centered")
 
-# Load / init session storage
-loaded_sessions = json.loads(SESSIONS_PATH.read_text()) if SESSIONS_PATH.exists() else {"New Chat": []}
+# ---------- Session storage (load or init) -----------------------------------
+loaded_sessions = (
+    json.loads(SESSIONS_PATH.read_text())
+    if SESSIONS_PATH.exists() else {"New Chat": []}
+)
 if "sessions" not in st.session_state:
     st.session_state.sessions = loaded_sessions
 if "current" not in st.session_state:
     st.session_state.current = list(st.session_state.sessions.keys())[0]
 
-# ----- SIDEBAR ---------------------------------------------------------------
+# ------------------------------ SIDEBAR --------------------------------------
 with st.sidebar:
     st.header("💻 Chats")
 
-    # New chat button
+    # "New Chat" button
     if st.button("➕ New Chat"):
         n, i = "New Chat", 1
         while n in st.session_state.sessions:
-            i += 1; n = f"New Chat {i}"
-        st.session_state.sessions[n]
+            i += 1
+            n = f"New Chat {i}"
+        st.session_state.sessions[n] = []  # fresh empty list
+        st.session_state.current = n       # switch to it
+        _rerun()
+
+    # List existing sessions
+    if st.session_state.sessions:
+        chat_names = list(st.session_state.sessions.keys())
+        choice = st.radio("Choose a chat:", chat_names, index=chat_names.index(st.session_state.current))
+        if choice != st.session_state.current:
+            st.session_state.current = choice
+            _rerun()
+
+    st.markdown("---")
+    st.caption("PDFs + Excel Q&A live inside the *data/* folder.")
+
+# ------------------------------ MAIN CHAT AREA -------------------------------
+st.header("💬 Chat")
+
+# 1️⃣ Display past messages
+for msg in st.session_state.sessions[st.session_state.current]:
+    st.chat_message(msg["role"]).write(msg["content"])
+
+# 2️⃣ Chat input box
+if prompt := st.chat_input("Ask me anything…"):
+    # Store user message
+    st.session_state.sessions[st.session_state.current].append({
+        "role": "user",
+        "content": prompt,
+        "id": str(uuid.uuid4()),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    })
+
+    # Get assistant reply
+    reply = answer(prompt)
+    st.session_state.sessions[st.session_state.current].append({
+        "role": "assistant",
+        "content": reply,
+        "id": str(uuid.uuid4()),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    })
+
+    # Persist to disk
+    try:
+        SESSIONS_PATH.write_text(json.dumps(st.session_state.sessions, indent=2))
+    except Exception as e:
+        logging.warning(f"Failed to save sessions: {e}")
+
+    _rerun()
